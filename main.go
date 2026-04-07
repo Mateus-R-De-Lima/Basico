@@ -24,7 +24,7 @@ func main() {
 	// Criamos um "coletor de rotas", um lugar onde guardamos
 	// quais endereços o servidor deve responder.
 
-	mux.HandleFunc("/healthcheck", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("POST /healthcheck", func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("Hola Mundo"))
 	})
 	// Aqui dizemos: "Quando alguém acessar /healthcheck,
