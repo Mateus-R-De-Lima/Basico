@@ -32,6 +32,11 @@ func main() { // Função principal onde o programa Go inicia sua execução
 
 		r.With(middleware.RealIP).Get("/users", func(w http.ResponseWriter, r *http.Request) {}) // Define rota GET para "/api/users" aplicando middleware RealIP (obtém IP real do cliente)
 
+		r.With(middleware.RealIP).Get("/users/{userId:[0-9]+}", func(w http.ResponseWriter, r *http.Request) { // Define rota GET para "/api/users/{userId}" onde userId deve ser um número, aplicando middleware RealIP
+			id := chi.URLParam(r, "userId")             // Extrai o parâmetro "userId" da URL usando a função URLParam do Chi
+			fmt.Fprintln(w, "Olá, usuário com ID :"+id) // Escreve uma resposta personalizada usando o ID do usuário extraído da URL
+		})
+
 		r.Group(func(r chi.Router) { // Cria um grupo de rotas que compartilha middlewares
 			r.Use(middleware.BasicAuth("", map[string]string{ // Adiciona middleware de autenticação básica HTTP
 				"admin": "admin", // Define credenciais: usuário "admin" com senha "admin"
