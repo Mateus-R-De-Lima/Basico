@@ -39,7 +39,7 @@ func main() { // Função principal onde o programa Go inicia sua execução
 	r.Group(func(r chi.Router) { // Cria um grupo de rotas para organizar endpoints relacionados
 		r.Use(jsonMiddleware)                              // Adiciona middleware personalizado para definir o header Content-Type como application/json para todas as rotas dentro deste grupo
 		r.Get("/users/{userId:[0-9]+}", handleGetUser(db)) // Define rota GET para "/users/{userId}" onde userId deve ser um número, usando a função handleGetUser para lidar com a requisição
-		r.Post("/users", handlePostUser)                   // Define rota POST para "/users" usando a função handlePostUser para lidar com a criação de um novo usuário (ainda sem implementação)
+		r.Post("/users", handlePostUser(db))               // Define rota POST para "/users" usando a função handlePostUser para lidar com a criação de um novo usuário (ainda sem implementação)
 
 	})
 
@@ -100,4 +100,54 @@ func handleGetUser(db map[int64]User) http.HandlerFunc {
 	}
 }
 
-func handlePostUser(w http.ResponseWriter, r *http.Request) {}
+func handlePostUser(db map[int64]User) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		r.Body = http.MaxBytesReader(w, r.Body, 1000) // Limita o tamanho do corpo da requisição para evitar abusos
+
+		var user User
+		decoder := json.NewDecoder(r.Body) // Cria um decoder JSON para ler o corpo da requisição
+		decoder.DisallowUnknownFields()    // Rejeita campos extras que não existem na struct User
+
+		if err := decoder.Decode(&user); err != nil { // Deserializa o JSON diretamente no struct User
+			writeValidationError(w, []map[string]string{{"Body": "Body inválido: JSON inválido ou campos extras não permitidos"}}, http.StatusUnprocessableEntity)
+			return
+		}
+
+		if errs := validateUser(user); len(errs) > 0 { // Valida os campos obrigatórios do usuário
+			writeValidationError(w, errs, http.StatusUnprocessableEntity)
+			return
+		}
+
+		db[int64(user.ID)] = user                    // Adiciona o novo usuário ao "banco de dados" (mapa em memória)
+		w.WriteHeader(http.StatusCreated)            // Retorna status 201 Created para indicar que o usuário foi criado com sucesso
+		json.NewEncoder(w).Encode(map[string]string{ // Retorna um JSON simples com mensagem de sucesso
+			"message": "Usuário criado com sucesso",
+		})
+	}
+}
+
+func writeValidationError(w http.ResponseWriter, errs []map[string]string, status int) {
+	w.WriteHeader(status)
+	json.NewEncoder(w).Encode(map[string]any{
+		"sucesso": false,
+		"erros":   errs,
+	})
+}
+
+func validateUser(user User) []map[string]string {
+	errs := []map[string]string{}
+
+	if user.ID == 0 {
+		errs = append(errs, map[string]string{"Id": "É obrigatório informar o Id"})
+	}
+
+	if user.Name == "" {
+		errs = append(errs, map[string]string{"Nome": "É obrigatório informar o nome"})
+	}
+
+	if user.Role == "" {
+		errs = append(errs, map[string]string{"Role": "É obrigatório informar o role"})
+	}
+
+	return errs
+}
