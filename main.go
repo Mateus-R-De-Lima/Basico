@@ -11,6 +11,27 @@ import (
 	"github.com/go-chi/chi/v5/middleware" // Middlewares do Chi, como logger, recoverer, etc.
 )
 
+type Response struct {
+	Error any `json:"error,omitempty"` // Campo Error do tipo any para armazenar informações de erro, com tag JSON para omitir se estiver vazio
+	Data  any `json:"data,omitempty"`  // Campo Data do tipo any para armazenar dados de resposta, com tag JSON para omitir se estiver vazio
+}
+
+func sendJSON(w http.ResponseWriter, status int, res Response) { // Função auxiliar para enviar respostas JSON, recebe o ResponseWriter, status HTTP e os dados a serem enviados
+	w.Header().Set("Content-Type", "application/json") // Define o header Content-Type como JSON
+	data, err := json.Marshal(res)
+	if err != nil {
+		http.Error(w, "Error creating JSON response", http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(status)
+
+	if _, err := w.Write(data); err != nil {
+		fmt.Println("Error writing response:", err)
+		return
+	}
+
+}
+
 type User struct { // Define uma estrutura (struct) chamada User para representar um usuário
 	ID       uint64 `json:"id,string"` // Campo ID do tipo uint64 para armazenar o identificador do usuário, com tag JSON para serialização como string
 	Name     string `json:"name"`      // Campo Name do tipo string para armazenar o nome do usuário, com tag JSON para serialização
@@ -28,7 +49,7 @@ func main() { // Função principal onde o programa Go inicia sua execução
 
 	r.Get("/horario", func(w http.ResponseWriter, r *http.Request) { // Define uma rota GET para o endpoint "/horario"
 		now := time.Now()    // Obtém a data e hora atuais do sistema
-		fmt.Fprintln(w, now) // Escreve a hora atual na resposta HTTP, enviando para o cliente
+		sendJSON(w, http.StatusOK, Response{Data: map[string]any{"horario": now}}) // Envia a hora atual em JSON
 	})
 
 	db := map[int64]User{
@@ -37,7 +58,6 @@ func main() { // Função principal onde o programa Go inicia sua execução
 	}
 
 	r.Group(func(r chi.Router) { // Cria um grupo de rotas para organizar endpoints relacionados
-		r.Use(jsonMiddleware)                              // Adiciona middleware personalizado para definir o header Content-Type como application/json para todas as rotas dentro deste grupo
 		r.Get("/users/{userId:[0-9]+}", handleGetUser(db)) // Define rota GET para "/users/{userId}" onde userId deve ser um número, usando a função handleGetUser para lidar com a requisição
 		r.Post("/users", handlePostUser(db))               // Define rota POST para "/users" usando a função handlePostUser para lidar com a criação de um novo usuário (ainda sem implementação)
 
@@ -74,13 +94,6 @@ func main() { // Função principal onde o programa Go inicia sua execução
 	}
 }
 
-func jsonMiddleware(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		next.ServeHTTP(w, r)
-	})
-}
-
 func handleGetUser(db map[int64]User) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		idStr := chi.URLParam(r, "userId")       // Extrai o parâmetro "userId" da URL usando a função URLParam do Chi
@@ -88,14 +101,9 @@ func handleGetUser(db map[int64]User) http.HandlerFunc {
 		user, ok := db[id]
 
 		if ok {
-			data, err := json.Marshal(user) // Serializa o usuário para JSON
-			if err != nil {
-				http.Error(w, "Erro ao serializar usuário", http.StatusInternalServerError) // Retorna erro se a serialização falhar
-				return
-			}
-			w.Write(data) // Envia os dados do usuário serializados como resposta HTTP
+			sendJSON(w, http.StatusOK, Response{Data: user}) // Usa sendJSON para enviar o usuário em formato JSON
 		} else {
-			http.Error(w, "Usuário não encontrado", http.StatusNotFound) // Retorna erro se o usuário não for encontrado
+			sendJSON(w, http.StatusNotFound, Response{Error: "Usuário não encontrado"}) // Usa sendJSON para enviar erro
 		}
 	}
 }
@@ -109,29 +117,18 @@ func handlePostUser(db map[int64]User) http.HandlerFunc {
 		decoder.DisallowUnknownFields()    // Rejeita campos extras que não existem na struct User
 
 		if err := decoder.Decode(&user); err != nil { // Deserializa o JSON diretamente no struct User
-			writeValidationError(w, []map[string]string{{"Body": "Body inválido: JSON inválido ou campos extras não permitidos"}}, http.StatusUnprocessableEntity)
+			sendJSON(w, http.StatusUnprocessableEntity, Response{Error: "Body inválido: JSON inválido ou campos extras não permitidos"})
 			return
 		}
 
 		if errs := validateUser(user); len(errs) > 0 { // Valida os campos obrigatórios do usuário
-			writeValidationError(w, errs, http.StatusUnprocessableEntity)
+			sendJSON(w, http.StatusUnprocessableEntity, Response{Error: map[string]any{"erros": errs}})
 			return
 		}
 
 		db[int64(user.ID)] = user                    // Adiciona o novo usuário ao "banco de dados" (mapa em memória)
-		w.WriteHeader(http.StatusCreated)            // Retorna status 201 Created para indicar que o usuário foi criado com sucesso
-		json.NewEncoder(w).Encode(map[string]string{ // Retorna um JSON simples com mensagem de sucesso
-			"message": "Usuário criado com sucesso",
-		})
+		sendJSON(w, http.StatusCreated, Response{Data: map[string]string{"message": "Usuário criado com sucesso"}}) // Usa sendJSON para resposta de criação
 	}
-}
-
-func writeValidationError(w http.ResponseWriter, errs []map[string]string, status int) {
-	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(map[string]any{
-		"sucesso": false,
-		"erros":   errs,
-	})
 }
 
 func validateUser(user User) []map[string]string {
